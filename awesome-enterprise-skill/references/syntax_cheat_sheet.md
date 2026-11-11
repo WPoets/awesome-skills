@@ -52,13 +52,16 @@ Apply these prefixes within attributes to force specific types:
 ```
 
 ### Multi-Query Safe SQL Template
+Never hardcode `wp_`. Build the table name from the `wpdb` prefix first:
 ```xml
+[wp.get wpdb o.set="template.wpdb" /]
+[str.create "{template.wpdb.prefix}posts" o.set="template.posts_table" /]
 [mysqli.multi.fetch.rows o.set="template.user_posts"]
     SET @author_id = [esc.int request.author /];
     SET @status = 'publish';
     
     SELECT ID, post_title, post_date 
-    FROM wp_posts 
+    FROM [esc.table template.posts_table /] 
     WHERE post_author = @author_id 
       AND post_status = @status;
 [/mysqli.multi.fetch.rows]
@@ -101,13 +104,13 @@ Modifiers format or manipulate the returned shortcode values.
 | `m.json_encode=yes` / `m.json_decode=yes` | None | JSON conversion |
 | `m.explode_on=s:delim` | `s:comma` / `s:space` etc. | Explode string to array |
 | `m.implode_on=s:delim` | `s:comma` / `s:quote_comma` | Implode array to string |
-| `m.number_format=yes` | `m.decimals=n:X` | Format floats with decimal count |
+| `m.number_format=yes` | `m.decimals=i:X` | Format floats with decimal count |
 | `m.money_format='en_IN'` | Optional: `m.currency='INR'` | Currency formatting |
 | `m.date_format='M d, Y'` | Format string | Format dates |
 | `m.hhmm_format=yes` | None | Format seconds into HH:MM:SS |
-| `m.words=n:X` / `m.words=yes` | `n:Count` | Limit word count |
+| `m.words=i:X` / `m.words=yes` | `i:Count` | Limit word count |
 | `m.url_encode=yes` / `m.url_decode=yes` | None | URL encoding/decoding |
-| `m.arr_item=s:val` / `m.arr_item=n:val` | `s:first` / `s:last` / `n:index` | Extract specific array item |
+| `m.arr_item=s:val` / `m.arr_item=i:val` | `s:first` / `s:last` / `i:index` | Extract specific array item |
 | `m.unset_item=val` | `first` / `last` / `key` | Remove array item |
 | `m.shuffle=yes` | None | Shuffle array items |
 | `m.solve=yes` | None | Solve mathematical expression |

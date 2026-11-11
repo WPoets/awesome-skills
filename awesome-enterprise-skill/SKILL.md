@@ -11,13 +11,12 @@ Awesome XP is an enterprise-grade WordPress application development platform and
 
 ## 1. Core Processor & Shortcode Execution Lifecycle
 
-The Awesome Processor parses low-code templates in four sequential stages:
+The Awesome Processor first strips comments (`//* ... *//`) from the template, then runs every shortcode through four sequential stages:
 
-1. **Comment Stripping**: Multi-line comments `//* ... *//` are removed.
-2. **Conditions (`c.*`)**: Evaluates conditional attributes (`c.cond`, `c.eq`, `c.empty`, `c.user_can`, `c.device`). If false, skips execution.
-3. **Service Execution**: Executes the service tag (e.g. `[mysqli.multi.fetch.rows]`, `[template.get]`, `[curl.api.get]`).
-4. **Modifiers (`m.*`)**: Chains data transformations sequentially (`m.json_decode`, `m.trim`, `m.implode_on`, `m.words`).
-5. **Outputters (`o.*`)**: Directs the final value (`o.set='template.var'`, `o.merge_with`, `o.destroy`, `o.echo`). If omitted, prints directly to the output stream.
+1. **Conditions (`c.*`)**: Evaluates conditional attributes (`c.cond`, `c.eq`, `c.empty`, `c.user_can`, `c.device`). If false, skips execution.
+2. **Service Execution**: Executes the service tag (e.g. `[mysqli.multi.fetch.rows]`, `[template.get]`, `[curl.api.get]`).
+3. **Modifiers (`m.*`)**: Chains data transformations sequentially (`m.json_decode`, `m.trim`, `m.implode_on`, `m.words`).
+4. **Outputters (`o.*`)**: Directs the final value (`o.set='template.var'`, `o.merge_with`, `o.destroy`, `o.echo`). If omitted, prints directly to the output stream.
 
 ### Scoping Hierarchy
 - **Module Scope (`module.*`)**: Active during module execution. Read/write with `[module.get]`, `[module.set]`.
@@ -46,15 +45,17 @@ The Awesome Processor parses low-code templates in four sequential stages:
 ### Core Safety, Escaping & Stream Trapping
 - **Zero-Tolerance SQL Escaping**: Never interpolate raw variables or curly braces directly into SQL. Always sanitize inputs via the `esc` library and assign to MySQL session variables:
   ```sql
+  [wp.get wpdb o.set="template.wpdb" /]
+  [str.create "{template.wpdb.prefix}posts" o.set="template.posts_table" /]
   [mysqli.multi.fetch.rows o.set="template.posts"]
     SET @cat = [esc.str request.category /];
     SET @status = 'publish';
-    SELECT ID, post_title FROM [env.get db.prefix /]posts
+    SELECT ID, post_title FROM [esc.table template.posts_table /]
     WHERE post_status = @status AND post_name = @cat;
   [/mysqli.multi.fetch.rows]
   ```
-- **MySQL LIMIT Clause**: MySQL session variables (e.g. `@limit`) cannot be used in `LIMIT`. Use hardcoded integer literals in the query template.
-- **Table Prefixes**: Never hardcode `wp_posts`. Always use `[env.get db.prefix /]posts`.
+- **MySQL LIMIT Clause**: MySQL session variables (e.g. `@limit`) cannot be used in `LIMIT`. Use a hardcoded integer literal, or `[esc.int template.limit /]` (as in `references/cheatsheet.md` §2.5).
+- **Table Prefixes**: Never hardcode `wp_posts`. `[wp.get wpdb /]` returns the `wpdb` object; read `prefix` from it, build the table name with `str.create`, then pass it through `[esc.table ... /]`. Run `awesome/template-validate` to confirm.
 - **Untrapped Output Stream Leaks**: Any service returning data (`mysqli.fetch.rows`, `curl.api.get`, `arr.create`) prints raw PHP debug strings directly to output unless captured via `o.set="path"` or suppressed via `o.destroy=yes`.
 - **Agent Allowlist Guardrails**: Enforced via `Allowlist::is_service_allowed`. In block templates (`context='block'`), write queries (`mysqli.cud`, `mysqli.multi.cud`), raw network calls (`curl.*`), and sensitive authentication (`wp.signon`) are disallowed.
 
@@ -62,6 +63,7 @@ The Awesome Processor parses low-code templates in four sequential stages:
 For the exhaustive catalog of all 450+ registered services across Core Lang (`arr.*`, `str.*`, `int.*`, `num.*`, `date.*`, `cond.*`, `while.*`, `arr_each.*`), Utilities (`request2.*`, `clean.*`, `unique.*`, `cookie.*`), Caching (`global_cache.*`, `redis.*`, `mysql.cache.*`), and Network/Integrations:
 - Consult: **[Awesome Shortcodes & Limitations Reference](references/shortcodes.md)**
 - Quick Syntax Reference: **[Syntax Cheat Sheet](references/syntax_cheat_sheet.md)**
+- Authoring workflow, validator rules and tooling gotchas: **[Template Validator Cheatsheet](references/cheatsheet.md)**
 
 ---
 
@@ -274,7 +276,16 @@ Awesome XP registers 31 standardized operations via `Abilities_Registry`:
 | **Export Pattern Pack** | `awesome/pattern-export` | `read` | Exports all managed patterns into a JSON manifest bundle. `{ "path": "optional/file/path" }` |
 | **Import Pattern Pack** | `awesome/pattern-import` | `author` | Imports a JSON pattern manifest into unsynced `wp_block` posts. `{ "manifest": [ ... ] }` |
 | **Flush Block Cache** | `awesome/blocks-flush` | `author` | Invalidates block registry cache and recompiles CSS stylesheets. `{}` |
-| **Read Guide** | `awesome/guide-read` | `read` | Returns reference guides (`overview`, `lifecycle`, `syntax`, `scopes`, `safety`, `css-tokens`, `block-css`, `wal-engine`, `patterns`, `pitfalls`). |
+| **Read Guide** | `awesome/guide-read` | `read` | Returns reference guides (`overview`, `lifecycle`, `syntax`, `scopes`, `safety`, `css-tokens`, `block-css`, `wal-engine`, `patterns`, `pitfalls`, `shortcodes`, `cheatsheet`). |
+
+The table above is a subset. Authoring abilities used in the block workflow (see `references/cheatsheet.md` §1): `awesome/block-list`, `awesome/token-list`, `awesome/service-list`, `awesome/dictionary-get`, `awesome/template-validate` (returns a `validation_token`), `awesome/template-preview`, `awesome/block-create`, `awesome/block-update`, `awesome/version-publish`, `awesome/log-list`. Check the live registry for the rest of the 31.
+
+### Block Authoring Workflow (summary)
+1. Read `guide-read`, then `block-list`, `token-list`, `service-list`. Reuse existing blocks and tokens first.
+2. Write the full SFC, then `template-validate` with `context: "block"`.
+3. Send the **identical string** plus the `validation_token` to `block-create` / `block-update`. Any edit, even one character, invalidates the token.
+4. `version-publish`, then **purge caches** (Awesome global, blocks, and NGINX if present, via the Awesome Enterprise admin page). `blocks-flush` alone is not enough.
+5. Verify on a live page. `template-preview` renders the body only, with no wrapper or post context.
 
 ### WP-CLI Tooling Commands
 ```bash
@@ -295,5 +306,17 @@ Before publishing templates or dynamic blocks, verify:
 3. **Template Scope Prefix**: Calls to `template.get` use `[template.get var /]`, NOT `[template.get template.var /]`.
 4. **Loop Iterator Scoping**: Iteration items are accessed via `.item` (`{@iterator.item.field}`).
 5. **No Attribute Brackets**: Never nest square brackets in attributes (`[env.set x=[esc.str y] /]`); use a temp variable.
-6. **SQL Escaping & LIMIT**: All query variables are passed via `[esc.*]` to MySQL session variables; `LIMIT` uses literals; queries use `[env.get db.prefix /]posts`.
+6. **SQL Escaping & LIMIT**: All query variables are passed via `[esc.*]` to MySQL session variables; `LIMIT` uses literals or `[esc.int]`; table names come from `wpdb` prefix + `[esc.table]`, never `wp_`.
 7. **Untrapped Streams**: Capture data-returning services with `o.set="path"` or suppress with `o.destroy=yes`.
+8. **Nested Same-Name Tags**: `[if.equal]` inside `[if.equal]` leaks a stray closing tag. Use a flag and different tag names, or flatten the condition.
+9. **Nested `{}` in CSS/JS**: Rejected (`nested-curly-braces`). No `@media` inside `@layer`; use intrinsic layouts (`auto-fit`, `clamp()`). Keep JS as flat functions.
+10. **Bracket Text in JS**: `name[a.b.c]` is parsed as a service call (`disallowed-service`). Use `el.getAttribute('data-x')` instead of `map[key]`.
+11. **Surface Values**: The valid option is `sunken`; `surface-sunken` only works through an alias in `awx-section`. Prefer `sunken`.
+12. **Control `attr_name`**: Must match what `render` reads exactly. A typo silently disables the control.
+
+---
+
+## 8. Supplementary Modular References
+- **[Shortcodes Reference](references/shortcodes.md)**: Master directory of 450+ services across 11 functional domains, typecasting prefixes, and execution boundaries.
+- **[Syntax Cheat Sheet](references/syntax_cheat_sheet.md)**: Quick tables for typecasting, conditions, modifiers, outputters and escapers.
+- **[Template Validator Cheatsheet](references/cheatsheet.md)**: Real-world gotchas, validator rules, JS bracket-in-shortcode collisions, nested `{}` limitations, and cache purging workflow.

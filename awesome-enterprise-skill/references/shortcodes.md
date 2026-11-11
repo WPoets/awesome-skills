@@ -6,7 +6,7 @@ This document is an exhaustive, production-grade reference manual covering all s
 
 ## Table of Contents
 
-1. [Executive Summary & Skill Gap Review](#1-executive-summary--skill-gap-review)
+1. [Executive Summary](#1-executive-summary)
 2. [Core Processor Architecture & Execution Lifecycle](#2-core-processor-architecture--execution-lifecycle)
 3. [Syntax, Typecasting & Variable Interpolation](#3-syntax-typecasting--variable-interpolation)
 4. [Variable Scoping Hierarchy](#4-variable-scoping-hierarchy)
@@ -59,23 +59,17 @@ This document is an exhaustive, production-grade reference manual covering all s
 
 ---
 
-## 1. Executive Summary & Skill Gap Review
+## 1. Executive Summary
 
-The existing `awesome-enterprise` skill (`.agents/skills/awesome-enterprise/SKILL.md`) is strongly focused on high-level orchestration:
-- Dynamic Gutenberg Blocks (DGB) SFC compiler standards (`aw_gb_blocks`)
-- The 12 Foundation Blocks catalog (`awx-section`, `awx-hero`, `awx-split`, etc.)
-- AWX Pattern Bridge (`wp_block`, metadata flags, JSON export/import)
-- Declarative Website Assembly Language (WAL) compilation & decompilation
-- 31 MCP Agent Abilities (`Abilities_Registry`)
+This reference covers the 450+ registered services in `core/core-handlers` and `core/extra-handlers`, grouped by library:
+- Core Lang: `env`, `loop`, `if`, `cond`, `while`, `arr_each`, `arr`, `str`, `int`, `num`, `date`, `regex`, `enum`, `taxonomy`, `validate`, `func`
+- Structure: modules, templates, collections, apps, content types
+- Request, security and utilities: `request2`, `esc`, `clean`, `cookie`, `unique`
+- Data and caching: `mysqli.*`, `global_cache`, `session_cache`, `mysql.cache`, `redis`
+- Front-end pipeline, network/office handlers, WordPress and Gutenberg integrations
+- Processor attributes (`c.*`, `m.*`, `o.*`) and platform guardrails (section 13)
 
-### Gaps Identified in Existing Skill Files
-1. **Omission of Core Lang Libraries**: The plugin implements over 450+ registered services across `core/core-handlers` and `core/extra-handlers`. The skill documents only a handful (`mysqli.multi.fetch.rows`, `template.get`, `curl.api.get`).
-2. **Missing Advanced Logic Blocks**: Modern features such as `cond.block`, `cond.switch`, `while.arr`, `while.build`, and functional iterators (`arr_each.map`, `arr_each.filter`, `arr_each.reduce`) are completely absent from the skill.
-3. **Missing Data Validation & Processing Libraries**: `regex`, `enum`, `taxonomy`, `currency`, `email_id`, `cookie`, `clean`, `unique`, and `validate.*` are omitted.
-4. **Missing Multi-Tier Caching Documentation**: Redis (`redis_db`, `redis.*`), MySQL Cache (`mysql.cache.*`), Session Cache (`session_cache.*`), and Global Cache (`global_cache.*`) are not referenced.
-5. **Partial Limitation Coverage**: Critical syntax constraints (such as nested attribute brackets, `{}` in content vs attributes, `LIMIT` variable bans, `template.get` auto-prefixing, and agent execution guardrails enforced by `Allowlist::is_service_allowed`) are not consolidated in one place.
-
-This reference document bridges all of these gaps.
+For block, pattern, WAL and MCP ability details, see `SKILL.md`. For the authoring workflow and validator gotchas, see `cheatsheet.md`.
 
 ---
 
@@ -634,6 +628,7 @@ Returns an associative array containing `info` (HTTP status, timing), `headers`,
 ## 11. WordPress & Gutenberg Integrations
 
 ### WP Utilities (`wp.get`, `wp.menu`, `wp.signon`, `wp.image_resize`)
+- `[wp.get wpdb o.set="template.wpdb" /]`: Returns the `wpdb` object (use its `prefix` for table names).
 - `[wp.get "site_url" /]`, `[wp.get "blog_name" /]`, `[wp.get "post_meta" post_id=10 key="price" /]`
 - `[wp.menu theme_location="primary" /]`: Renders WordPress navigation menu.
 - `[wp.signon username="admin" password="..." /]`: Authenticates WordPress user.
@@ -734,7 +729,7 @@ Outputters handle where the final value is sent:
 - **Direct Concatenation Forbidden**: Writing `WHERE post_title = '{request.title}'` will fail template validation (`awesome/template-validate`).
 - **Parameterization Pattern**: Always escape variables into MySQL session variables (`SET @title = [esc.str request.title /];`) at the start of multi-queries.
 - **`LIMIT` Clause Restriction**: MySQL does not permit session variables in the `LIMIT` clause (e.g. `LIMIT @limit` is illegal). Limit values must be hardcoded integer literals.
-- **Table Prefixes**: Never write `FROM wp_posts`. Always use `FROM [env.get db.prefix /]posts`.
+- **Table Prefixes**: Never write `FROM wp_posts`. `[wp.get wpdb /]` returns the `wpdb` object; read `prefix` from it, build the table name with `str.create`, then use `FROM [esc.table template.posts_table /]`.
 
 ### 2. Stream Leaks from Untrapped Output
 - Any service returning data (e.g., `mysqli.fetch.rows`, `curl.api.get`, `arr.create`) will print raw PHP debug arrays (`print_r`) directly into the HTML response stream unless trapped:
